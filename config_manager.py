@@ -24,6 +24,17 @@ class ConfigManager:
         """
         return self._data
 
+    @data.setter
+    def data(self, value: Dict) -> None:
+        """Replace the configuration data.
+
+        Using a setter allows callers to assign a new configuration
+        dictionary to the manager.  The provided value completely
+        replaces the existing configuration, so callers should ensure
+        any required keys are present before saving.
+        """
+        self._data = value
+
     def default_config(self) -> Dict:
         return {
             'question_region': {'x': 115, 'y': 680, 'width': 680, 'height': 200},
