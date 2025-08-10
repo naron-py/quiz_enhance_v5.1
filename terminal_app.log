@@ -1,0 +1,10 @@
+2025-08-11 02:08:51,084 - INFO - Using downloaded & verified file: C:\Users\Fade\.cache\doctr\models\db_resnet50-79bd7d70.pt
+2025-08-11 02:08:52,306 - INFO - Using downloaded & verified file: C:\Users\Fade\.cache\doctr\models\crnn_vgg16_bn-0417f351.pt
+2025-08-11 02:08:52,494 - INFO - Using GPU for OCR
+2025-08-11 02:08:52,495 - INFO - OCR Processor initialized.
+2025-08-11 02:08:52,500 - INFO - Loaded magic database with 1189 questions
+2025-08-11 02:08:52,519 - INFO - TF-IDF matrix computed with 1189 questions.
+2025-08-11 02:08:52,519 - INFO - Initialization complete. Active database: magic
+2025-08-11 02:08:58,710 - INFO - Screen regions captured.
+2025-08-11 02:08:59,421 - INFO - OCR processing complete. Question: config Show current configuration pos Configure question and answer regions via GUI data name Switch database options default, magic, mugg set key val Set configuration values help Show complete help message exit Exit the application F2 Pressed Capturing and Processing term
+2025-08-11 02:08:59,426 - WARNING - No database match found for OCR question: 'config Show current configuration pos Configure question and answer regions via GUI data name Switch database options default, magic, mugg set key val Set configuration values help Show complete help message exit Exit the application F2 Pressed Capturing and Processing term'
