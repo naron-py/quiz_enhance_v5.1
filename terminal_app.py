@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import json
 import os
-from PIL import Image, ImageTk
+from PIL import ImageTk
 import tkinter as tk
 import pyautogui
 import mss
@@ -11,7 +11,6 @@ pyautogui.PAUSE = 0
 pyautogui.MINIMUM_DURATION = 0
 import difflib
 import re
-from ocr_processor import OCRProcessor
 from config_manager import ConfigManager
 import time
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -24,14 +23,13 @@ import gc  # For garbage collection
 from datetime import datetime # Added for timestamped filenames
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, Optional
 
 # Import Rich for colored terminal output
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich.text import Text
-from rich.box import Box, ROUNDED, SIMPLE
+from rich.box import ROUNDED
 console = Console()
 
 # Configuration file path
