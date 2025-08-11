@@ -758,7 +758,6 @@ def initialize():
         # Provide user feedback regardless of log level
         console.print(
             f"[bold green]Reload successful: Loaded [{active_database.capitalize()}] {len(questions_df)} questions.[/bold green]"
-            f"[bold green]Reload successful: Loaded {len(questions_df)} questions.[/bold green]"
         )
     else:
         logging.warning("Failed to load questions data.")
