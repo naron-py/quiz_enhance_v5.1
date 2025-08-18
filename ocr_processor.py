@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 import logging
 from typing import Dict, List, Optional, Union
+import time
 from PIL import Image
 from doctr.io import DocumentFile
 from doctr.models import ocr_predictor
@@ -145,4 +146,47 @@ class OCRProcessor:
         except Exception as e:
             for name in region_names:
                 results[name] = ''
-        return results 
+        return results
+
+    def export_detection_torchscript(self, export_path: str = "det_model.ts") -> Optional[str]:
+        """Export the detection sub-model to TorchScript for investigation."""
+        try:
+            det_model = self.model.det_predictor.model
+            det_model.eval()
+            device = next(det_model.parameters()).device
+            example = torch.randn(1, 3, 512, 512, device=device)
+            scripted = torch.jit.trace(det_model, example)
+            scripted.save(export_path)
+            self.logger.info(f"Detection model exported to {export_path}")
+            return export_path
+        except Exception as e:
+            self.logger.error(f"Failed to export detection model: {e}")
+            return None
+
+    def benchmark_detection(self, export_path: str = "det_model.ts", runs: int = 10) -> Dict[str, float]:
+        """Benchmark inference speed between PyTorch and TorchScript detection models."""
+        det_model = self.model.det_predictor.model
+        device = next(det_model.parameters()).device
+        dummy = torch.randn(1, 3, 512, 512, device=device)
+
+        det_model.eval()
+        for _ in range(3):
+            det_model(dummy)
+        start = time.time()
+        for _ in range(runs):
+            det_model(dummy)
+        pytorch_time = (time.time() - start) / runs
+
+        script = torch.jit.load(export_path, map_location=device)
+        script.eval()
+        for _ in range(3):
+            script(dummy)
+        start = time.time()
+        for _ in range(runs):
+            script(dummy)
+        script_time = (time.time() - start) / runs
+
+        self.logger.info(
+            f"Detection benchmark - PyTorch: {pytorch_time:.4f}s, TorchScript: {script_time:.4f}s"
+        )
+        return {"pytorch": pytorch_time, "torchscript": script_time}
