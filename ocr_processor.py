@@ -4,7 +4,7 @@ import torch
 import re
 from pathlib import Path
 import logging
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 import time
 from PIL import Image
 from doctr.io import DocumentFile
@@ -27,9 +27,25 @@ class OCRProcessor:
         self.debug_dir = Path('debug_images')
         self.debug_dir.mkdir(exist_ok=True)
         
-    def preprocess_image(self, image: Union[str, np.ndarray, Image.Image]) -> np.ndarray:
+    def preprocess_image(self, image: Union[str, np.ndarray, Image.Image]) -> Optional[np.ndarray]:
         """Enhanced image preprocessing for better text recognition"""
         try:
+            if image is None:
+                self.logger.warning("Received None image for preprocessing; skipping.")
+                return None
+
+            if isinstance(image, str) and not image:
+                self.logger.warning("Received empty image path for preprocessing; skipping.")
+                return None
+
+            if isinstance(image, np.ndarray) and image.size == 0:
+                self.logger.warning("Received empty numpy array for preprocessing; skipping.")
+                return None
+
+            if isinstance(image, Image.Image) and (image.size[0] == 0 or image.size[1] == 0):
+                self.logger.warning("Received empty PIL image for preprocessing; skipping.")
+                return None
+
             # Convert input to numpy array
             if isinstance(image, str):
                 image = Image.open(image).convert('RGB')
@@ -38,6 +54,10 @@ class OCRProcessor:
                 image_np = np.array(image)
             else:
                 image_np = image
+
+            if image_np.size == 0:
+                self.logger.warning("Received image with no data after conversion; skipping.")
+                return None
 
             # Convert to RGB if needed
             if len(image_np.shape) == 2:  # Grayscale
@@ -70,7 +90,7 @@ class OCRProcessor:
             
         except Exception as e:
             self.logger.error(f"Error preprocessing image: {str(e)}")
-            return image_np
+            return None
 
     def clean_text(self, text: str) -> str:
         """Clean and normalize OCR text output"""
@@ -93,7 +113,11 @@ class OCRProcessor:
         try:
             # Preprocess the image
             processed_image = self.preprocess_image(image)
-            
+
+            if processed_image is None:
+                self.logger.warning("Skipping OCR because preprocessing returned no data.")
+                return ""
+
             # Perform OCR using docTR
             if torch.cuda.is_available():
                 with torch.amp.autocast('cuda'):
@@ -125,20 +149,49 @@ class OCRProcessor:
         # Prepare images in order
         region_names = list(regions.keys())
         
-        def _preprocess(name: str) -> np.ndarray:
-            return self.preprocess_image(regions[name])
+        def _preprocess(item: Tuple[str, np.ndarray]) -> Tuple[str, Optional[np.ndarray]]:
+            name, region_image = item
+            return name, self.preprocess_image(region_image)
 
         with ThreadPoolExecutor() as executor:
-            images = list(executor.map(_preprocess, region_names))
-        results = {}
+            processed_pairs = list(executor.map(_preprocess, regions.items()))
+
+        skipped_names: List[str] = []
+        valid_names: List[str] = []
+        valid_images: List[np.ndarray] = []
+        results = {name: "" for name in region_names}
+
+        for name, processed_image in processed_pairs:
+            if processed_image is None or (isinstance(processed_image, np.ndarray) and processed_image.size == 0):
+                skipped_names.append(name)
+            else:
+                valid_names.append(name)
+                valid_images.append(processed_image)
+
+        if len(skipped_names) == len(region_names):
+            if skipped_names:
+                self.logger.warning(
+                    "All regions skipped during preprocessing: %s",
+                    ", ".join(skipped_names)
+                )
+            return results
+
         try:
-            # Batch OCR
+            # Batch OCR only on valid images
             if torch.cuda.is_available():
                 with torch.amp.autocast('cuda'):
-                    ocr_results = self.model(images)
+                    ocr_results = self.model(valid_images)
             else:
-                ocr_results = self.model(images)
-            for idx, page in enumerate(ocr_results.pages):
+                ocr_results = self.model(valid_images)
+
+            if len(ocr_results.pages) != len(valid_names):
+                self.logger.warning(
+                    "Mismatch between OCR pages and valid regions: %d vs %d",
+                    len(ocr_results.pages),
+                    len(valid_names)
+                )
+
+            for name, page in zip(valid_names, ocr_results.pages):
                 text_parts = []
                 for block in page.blocks:
                     for line in block.lines:
@@ -147,10 +200,17 @@ class OCRProcessor:
                             text_parts.append(line_text)
                 full_text = ' '.join(text_parts)
                 cleaned_text = self.clean_text(full_text)
-                results[region_names[idx]] = cleaned_text
+                results[name] = cleaned_text
         except Exception as e:
-            for name in region_names:
-                results[name] = ''
+            self.logger.error(f"Error during batch OCR: {str(e)}")
+            return results
+
+        if skipped_names:
+            self.logger.warning(
+                "Skipped OCR for regions without valid images: %s",
+                ", ".join(skipped_names)
+            )
+
         return results
 
     def export_detection_torchscript(self, export_path: str = "det_model.ts") -> Optional[str]:
