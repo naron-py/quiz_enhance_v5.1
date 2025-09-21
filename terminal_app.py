@@ -32,6 +32,17 @@ from rich.panel import Panel
 from rich.box import ROUNDED
 console = Console()
 
+# Shared MSS instance for screen capture reuse
+_mss_instance = None
+
+
+def get_mss_instance():
+    """Return a shared MSS instance, creating it if necessary."""
+    global _mss_instance
+    if _mss_instance is None:
+        _mss_instance = mss.mss()
+    return _mss_instance
+
 # Configuration file path
 CONFIG_FILE = 'config.json'
 config_manager = ConfigManager(CONFIG_FILE)
@@ -96,16 +107,26 @@ def reset_last_auto_clicked_pair():
     logging.debug("Reset last auto-clicked question and choice.")
 
 def capture_screen(region):
-    """Capture a specific region of the screen"""
-    with mss.mss() as sct:
-        bbox = {
-            "left": region['x'],
-            "top": region['y'],
-            "width": region['width'],
-            "height": region['height']
-        }
-        screenshot = sct.grab(bbox)
-        return cv2.cvtColor(np.array(screenshot), cv2.COLOR_BGRA2BGR)
+    """Capture a specific region of the screen using the shared MSS instance."""
+    sct = get_mss_instance()
+    bbox = {
+        "left": region['x'],
+        "top": region['y'],
+        "width": region['width'],
+        "height": region['height']
+    }
+    screenshot = sct.grab(bbox)
+    return cv2.cvtColor(np.array(screenshot), cv2.COLOR_BGRA2BGR)
+
+
+def _offset_region(region: dict, offset_x: int, offset_y: int) -> dict:
+    """Shift a region by the provided offsets without mutating the original."""
+    return {
+        'x': region['x'] - offset_x,
+        'y': region['y'] - offset_y,
+        'width': region['width'],
+        'height': region['height']
+    }
 
 def record_elapsed_time(key: str, start_time: float) -> None:
     """Record the elapsed time for a timing entry using the provided start time."""
@@ -472,9 +493,45 @@ def capture_and_process():
         capture_start = time.time()
         captured_images.clear() # Clear previous captures
         try:
-            captured_images['question'] = capture_screen(config['question_region'])
-            for label, region in config['answer_regions'].items():
-                captured_images[label] = capture_screen(region)
+            # Combine regions into a single capture window
+            all_regions = {'question': config.get('question_region', {})}
+            all_regions.update(config.get('answer_regions', {}))
+
+            # Filter out any empty region definitions
+            valid_regions = [region for region in all_regions.values() if region]
+            if not valid_regions:
+                raise ValueError("No screen regions configured for capture.")
+
+            # Determine the bounding box that covers all regions
+            min_left = min(region['x'] for region in valid_regions)
+            min_top = min(region['y'] for region in valid_regions)
+            max_right = max(region['x'] + region['width'] for region in valid_regions)
+            max_bottom = max(region['y'] + region['height'] for region in valid_regions)
+
+            bbox = {
+                "left": min_left,
+                "top": min_top,
+                "width": max_right - min_left,
+                "height": max_bottom - min_top
+            }
+
+            sct = get_mss_instance()
+            combined_screenshot = sct.grab(bbox)
+            combined_image = cv2.cvtColor(np.array(combined_screenshot), cv2.COLOR_BGRA2BGR)
+
+            # Slice the combined capture back into individual regions
+            question_region = config.get('question_region')
+            if question_region:
+                relative_question = _offset_region(question_region, min_left, min_top)
+                captured_images['question'] = crop_image_from_numpy(combined_image, relative_question)
+
+            for label, region in config.get('answer_regions', {}).items():
+                if not region:
+                    captured_images[label] = None
+                    continue
+                relative_region = _offset_region(region, min_left, min_top)
+                captured_images[label] = crop_image_from_numpy(combined_image, relative_region)
+
             capture_end = time.time()
             timings['capture'] = capture_end - capture_start
             logging.info("Screen regions captured.")
