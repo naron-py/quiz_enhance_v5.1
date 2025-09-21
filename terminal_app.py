@@ -107,6 +107,11 @@ def capture_screen(region):
         screenshot = sct.grab(bbox)
         return cv2.cvtColor(np.array(screenshot), cv2.COLOR_BGRA2BGR)
 
+def record_elapsed_time(key: str, start_time: float) -> None:
+    """Record the elapsed time for a timing entry using the provided start time."""
+    elapsed = time.time() - start_time
+    timings[key] = timings.get(key, 0.0) + elapsed
+
 def click_on_answer(region):
     """Click in the middle of the specified answer region"""
     try:
@@ -381,6 +386,7 @@ def capture_and_save_fullscreen_on_nomatch():
     """Captures the entire screen and saves it when no DB match is found."""
     global question_capture_count
     try:
+        start_time = time.time()
         # Ensure the directory exists
         save_dir = Path('not_found_pic')
         save_dir.mkdir(exist_ok=True)
@@ -398,6 +404,7 @@ def capture_and_save_fullscreen_on_nomatch():
         cv2.imwrite(str(filename), fullscreen_img_np)
         logging.info(f"Saved full screen capture due to no match: {filename}")
         console.print(f"[yellow]No match found. Saved fullscreen capture: {filename}[/yellow]")
+        record_elapsed_time('image_save', start_time)
     except Exception as e:
         logging.error(f"Failed to capture/save fullscreen on no match: {e}", exc_info=True)
         console.print(f"[bold red]Error saving fullscreen capture:[/bold red] {e}")
@@ -536,7 +543,9 @@ def capture_and_process():
 
         # Save images if configured
         if config.get('save_all_captured_images', False):
+            image_save_start = time.time()
             save_processed_images(question_capture_count) # Pass the current count
+            record_elapsed_time('image_save', image_save_start)
 
         # 3. Find Best Match
         match_start = time.time()
@@ -679,8 +688,21 @@ def capture_and_process():
     end_total_time = time.time()
     timings['total_cycle'] = end_total_time - start_total_time
     if config.get('show_processing_times', True):
+        display_order = ['capture', 'ocr', 'matching', 'image_save', 'auto_click', 'find_best_match', 'total_cycle']
+        timing_entries = []
+
+        for key in display_order:
+            if key in timings:
+                timing_entries.append(f"{key}: {timings[key]:.3f}s")
+
+        for key, value in timings.items():
+            if key not in display_order:
+                timing_entries.append(f"{key}: {value:.3f}s")
+
+        panel_text = " | ".join(timing_entries) if timing_entries else "No timings recorded."
+
         timing_panel = Panel(
-            " | ".join([f"{k}: {v:.3f}s" for k, v in timings.items()]),
+            panel_text,
             title="[bold blue]Processing Times[/bold blue]",
             border_style="blue"
         )
