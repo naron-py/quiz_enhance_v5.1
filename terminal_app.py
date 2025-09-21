@@ -32,16 +32,30 @@ from rich.panel import Panel
 from rich.box import ROUNDED
 console = Console()
 
-# Shared MSS instance for screen capture reuse
-_mss_instance = None
+# Shared MSS instances for screen capture reuse (one per thread)
+_mss_instances = threading.local()
 
 
 def get_mss_instance():
-    """Return a shared MSS instance, creating it if necessary."""
-    global _mss_instance
-    if _mss_instance is None:
-        _mss_instance = mss.mss()
-    return _mss_instance
+    """Return a thread-local MSS instance, creating it if necessary."""
+    instance = getattr(_mss_instances, "instance", None)
+    if instance is None:
+        instance = mss.mss()
+        _mss_instances.instance = instance
+    return instance
+
+
+def clear_thread_mss_instance():
+    """Dispose of the current thread's MSS instance, if any."""
+    instance = getattr(_mss_instances, "instance", None)
+    if instance is not None:
+        close = getattr(instance, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception as exc:
+                logging.warning("Error closing MSS instance: %s", exc, exc_info=True)
+        _mss_instances.instance = None
 
 # Configuration file path
 CONFIG_FILE = 'config.json'
@@ -844,24 +858,26 @@ def on_press(key):
 def spam_capture_loop():
     """Continuously capture and process quiz questions without any delay between captures"""
     global spam_capture_mode
-    
+
     console.print("[bold green]Starting spam capture mode[/bold green]")
     console.print("[bold cyan]Press F10 to stop spam capture mode[/bold cyan]")
-    
-    while spam_capture_mode:
-        try:
-            # Process one capture cycle
-            result = capture_and_process()
-            
-            # No delay between captures - immediately start next capture
-            # (removed the time.sleep() to fulfill requirement for continuous captures)
-            
-        except Exception as e:
-            logging.error(f"Error in spam capture loop: {e}", exc_info=True)
-            console.print(f"[bold red]Error in spam capture:[/bold red] {e}")
-            time.sleep(1)  # Pause briefly on error to prevent error flood
-    
-    console.print("[bold yellow]Spam capture mode stopped[/bold yellow]")
+
+    try:
+        while spam_capture_mode:
+            try:
+                # Process one capture cycle
+                result = capture_and_process()
+
+                # No delay between captures - immediately start next capture
+                # (removed the time.sleep() to fulfill requirement for continuous captures)
+
+            except Exception as e:
+                logging.error(f"Error in spam capture loop: {e}", exc_info=True)
+                console.print(f"[bold red]Error in spam capture:[/bold red] {e}")
+                time.sleep(1)  # Pause briefly on error to prevent error flood
+    finally:
+        clear_thread_mss_instance()
+        console.print("[bold yellow]Spam capture mode stopped[/bold yellow]")
 
 
 
