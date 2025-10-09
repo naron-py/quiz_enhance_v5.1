@@ -1276,6 +1276,7 @@ def show_help():
     print("\n--- Available Commands ---")
     print(" capture / F2   : Capture screen regions, OCR, and find match.")
     print(" autoclick      : Toggle auto-clicking the matched answer region.")
+    print(" autoscan / F10 : Toggle continuous spam capture mode.")
     print(" filterselected : Toggle filtering '[number] selected' pattern from answers.")
     print(" pos            : Configure question and answer regions via GUI.")
     print(" test           : Run the accuracy_evaluator.py script for batch testing.")
@@ -1310,6 +1311,7 @@ if __name__ == "__main__":
     print("test           - Run the accuracy_evaluator.py script for batch testing")
     print("config         - Show current configuration")
     print("pos            - Configure question and answer regions via GUI")
+    print("autoscan       - Toggle continuous spam capture mode (same as F10)")
     print("data <name>    - Switch database options (default, magic, muggle, all)")
     print("set <key> <val> - Set configuration values")
     print("help           - Show complete help message")
@@ -1355,6 +1357,8 @@ if __name__ == "__main__":
                         switch_database(args[0])
                     elif command == "autoclick":
                         toggle_auto_click()
+                    elif command == "autoscan":
+                        toggle_spam_capture_mode()
                     elif command == "filterselected":
                         toggle_filter_selected()
                     elif command == "pos":
