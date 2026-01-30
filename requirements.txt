@@ -20,6 +20,7 @@ python-doctr[torch]>=0.6.0
 rich>=12.0.0
 colorama>=0.4.4
 prettytable>=2.5.0
+pywebview>=4.0.0
 
 # Metric computation
 editdistance>=0.6.0

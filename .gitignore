@@ -7,3 +7,6 @@ debug_images/
 all_captures/
 accuracy_reports/
 terminal_app.log
+venv/
+.cache/
+not_found_pic/

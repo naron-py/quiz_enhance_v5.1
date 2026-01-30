@@ -16,10 +16,18 @@ echo.
 cd /d "%~dp0"
 echo Working directory: %CD%
 
-:: Make sure Python is in the path
-where python >nul 2>&1
-IF %ERRORLEVEL% NEQ 0 (
-    echo Python not found in PATH. Please check your Python installation.
+:: Check for Virtual Environment
+if not exist "%~dp0venv\Scripts\python.exe" (
+    echo.
+    echo [FIRST RUN DETECTED]
+    echo Virtual environment not found. Running setup...
+    echo.
+    call "%~dp0setup_env.bat"
+)
+
+:: Make sure Python is in the path (in venv)
+if not exist "%~dp0venv\Scripts\python.exe" (
+    echo Setup failed or canceled. Python not found in venv.
     echo Press any key to exit...
     pause >nul
     exit /b 1
@@ -27,7 +35,7 @@ IF %ERRORLEVEL% NEQ 0 (
 
 
 :: Start the terminal app with full path using Windows Terminal
-start wt.exe cmd /k "cd /d "%~dp0" && python "%~dp0terminal_app.py""
+start cmd /k "cd /d "%~dp0" && "%~dp0venv\Scripts\python.exe" "%~dp0terminal_app.py""
 
 echo.
 echo HPMA Quiz Assistant started successfully!
