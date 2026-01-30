@@ -34,13 +34,15 @@ if not exist "%~dp0venv\Scripts\python.exe" (
 )
 
 
-:: Start the terminal app with full path using Windows Terminal
-start cmd /k "cd /d "%~dp0" && "%~dp0venv\Scripts\python.exe" "%~dp0terminal_app.py""
-
 echo.
 echo HPMA Quiz Assistant started successfully!
 echo F2 - Capture and process quiz
 echo F3 - Clear overlay
 echo.
-echo Press any key to exit this window...
-pause > nul 
+
+:: Start the terminal app directly in this window
+"%~dp0venv\Scripts\python.exe" "%~dp0terminal_app.py"
+
+echo.
+echo Application exited.
+pause

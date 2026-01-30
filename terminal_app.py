@@ -819,6 +819,9 @@ def capture_and_process():
                  # Filter out [number] selected pattern if enabled
                  if config.get('filter_selected_pattern', True):
                      recognized_text[label] = filter_selected_pattern(recognized_text[label])
+                 
+                 # Apply aggressive answer cleaning to remove OCR noise
+                 recognized_text[label] = ocr_processor.clean_answer_text(recognized_text[label])
 
             deduplicate_spam_capture = config.get('spam_capture_deduplication', True)
 
@@ -1624,7 +1627,7 @@ def run_self_test():
 
         ocr_texts = local_ocr.process_quiz_regions(regions)
         ocr_question_text = ocr_texts.get('question', '')
-        recognized = {label: ocr_texts.get(label, '') for label in ['A', 'B', 'C', 'D']}
+        recognized = {label: local_ocr.clean_answer_text(ocr_texts.get(label, '')) for label in ['A', 'B', 'C', 'D']}
 
         if not (ocr_question_text and questions_df is not None and tfidf_vectorizer is not None):
             console.print(f"[yellow]Skipping {name}: no OCR question or TF-IDF not ready.[/yellow]")
