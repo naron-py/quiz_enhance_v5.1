@@ -290,9 +290,9 @@ class OCRProcessor:
              batch_images.append(q_img)
              batch_keys.append('question')
              
-        # Add Answers (Downscaled 0.6x)
+        # Add Answers (Downscaled 0.5x)
         answer_keys = [k for k in processed_map.keys() if k != 'question']
-        scale = 0.6
+        scale = 0.5 # Bumped from 0.4 to ensure single digits are legible
         for k in answer_keys:
             img = processed_map[k]
             if img.size == 0: continue
@@ -301,7 +301,11 @@ class OCRProcessor:
             new_size = (int(w * scale), int(h * scale))
             resized = cv2.resize(img, new_size, interpolation=cv2.INTER_AREA)
             
-            batch_images.append(resized)
+            # Add Padding (Letterboxing) to help Neural Model see edges
+            # White border (255) to match background
+            padded = cv2.copyMakeBorder(resized, 5, 5, 10, 10, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+            
+            batch_images.append(padded)
             batch_keys.append(k)
             
         # 3. Running Inference
@@ -320,10 +324,13 @@ class OCRProcessor:
                     
                     # Extract Text
                     words = []
+                    # Ultra-low confidence for Answers (0.2) + Padding = Max Recall for "6"
+                    thresh = 0.2 if key != 'question' else self.min_confidence
+                    
                     for block in page.blocks:
                         for line in block.lines:
                             # Filter low confidence
-                            line_words = [w.value for w in line.words if w.confidence >= self.min_confidence]
+                            line_words = [w.value for w in line.words if w.confidence >= thresh]
                             words.extend(line_words)
                     
                     full_text = " ".join(words)
