@@ -37,7 +37,6 @@ if not exist "%~dp0venv\Scripts\python.exe" (
 echo.
 echo HPMA Quiz Assistant started successfully!
 echo F2 - Capture and process quiz
-echo F3 - Clear overlay
 echo.
 
 :: Start the terminal app directly in this window

@@ -209,12 +209,14 @@ class OCRProcessor:
         # 1. Convert to Grayscale
         gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
         
-        # 2. Threshold (Otsu)
+        # 2. Threshold (Otsu - Reverted for Robustness)
+        # Adaptive Thresholding caused empty results. Otsu is safer.
         blur = cv2.GaussianBlur(gray, (3,3), 0)
         _, binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         
         # 3. Morphological Dilation to connect letters into words
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (10, 3))
+        # Kernel width (12) slightly larger to ensure connection
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (12, 3))
         dilated = cv2.dilate(binary, kernel, iterations=1)
         
         # 4. Find Contours
@@ -229,22 +231,21 @@ class OCRProcessor:
             x, y, w, h = cv2.boundingRect(cnt)
             
             # Filter Noise
-            # Min width 10, Min height 12 (filters dashed lines, small noise)
-            if w < 10 or h < 12:
+            # Min width 10, Min height 10 
+            if w < 10 or h < 10:
                 continue
                 
             # Filter Edges (Relaxed to avoid deleting valid text)
             if filter_edges:
                 # Only remove artifacts touching the VERY edges (e.g. 1px border)
-                # Previous logic (x < 15) was too aggressive for left-aligned text
                 if x < 2 or (x + w) > (img_w - 2):
                     continue
                 
             bounding_boxes.append((x, y, w, h))
             
-        # 5. Sort Contours (Top-to-Bottom, then Left-to-Right)
-        # Tolerance for lines: 10px
-        bounding_boxes.sort(key=lambda b: (int(b[1] / 10), b[0]))
+        # 5. Sort Contours (Left-to-Right ONLY)
+        # Since answers are single-line, Y-sorting causes scrambling if text is jittery.
+        bounding_boxes.sort(key=lambda b: b[0])
         
         # 6. Crop
         pad = 2
@@ -258,13 +259,15 @@ class OCRProcessor:
 
     def process_quiz_regions(self, regions: Dict[str, np.ndarray]) -> Dict[str, str]:
         """
-        Hybrid Processing Strategy:
-        - Question: Use Robust Neural Detection (High accuracy for multi-line text).
-        - Answers: Use Fast OpenCV Detection (High speed for single-line text).
+        Robust & Fast Strategy:
+        - Question: Neural Detection (Full Resolution) for max accuracy.
+        - Answers: Neural Detection (Batch + Downscaled) for speed + accuracy.
+          (OpenCV detection was too fragile for this game's UI).
         """
         results = {name: "" for name in regions.keys()}
         
         # 1. Preprocess All Images
+        # Preprocessing includes Inversion (Light on Dark -> Dark on Light)
         def _preprocess(item):
             name, img = item
             return name, self.preprocess_image(img)
@@ -274,78 +277,65 @@ class OCRProcessor:
             
         processed_map = {name: img for name, img in processed_pairs if img is not None}
         
-        # 2. Process QUESTION (Neural Pipeline - Robust)
-        if 'question' in processed_map:
+        # 2. Preparation for Single Batch Inference
+        # We combine Question + Answers into one batch to minimize Model Launch Overhead.
+        # This is the key to sub-0.3s performance with Neural Accuracy.
+        
+        batch_images = []
+        batch_keys = []
+        
+        # Add Question (Full Res)
+        q_img = processed_map.get('question')
+        if q_img is not None:
+             batch_images.append(q_img)
+             batch_keys.append('question')
+             
+        # Add Answers (Downscaled 0.6x)
+        answer_keys = [k for k in processed_map.keys() if k != 'question']
+        scale = 0.6
+        for k in answer_keys:
+            img = processed_map[k]
+            if img.size == 0: continue
+            
+            h, w = img.shape[:2]
+            new_size = (int(w * scale), int(h * scale))
+            resized = cv2.resize(img, new_size, interpolation=cv2.INTER_AREA)
+            
+            batch_images.append(resized)
+            batch_keys.append(k)
+            
+        # 3. Running Inference
+        if batch_images:
             try:
-                q_img = processed_map['question']
-                # Run full model (Detection + Recognition) on just the question
-                # This ensures complex layout is handled correctly
                 with self.inference_context():
                     if torch.cuda.is_available():
                         with torch.amp.autocast('cuda'):
-                            q_result = self.model([q_img])
+                            batch_result = self.model(batch_images)
                     else:
-                        q_result = self.model([q_img])
+                        batch_result = self.model(batch_images)
                 
-                # Extract text
-                text_parts = []
-                for page in q_result.pages:
+                # 4. Parsing Results
+                for i, page in enumerate(batch_result.pages):
+                    key = batch_keys[i]
+                    
+                    # Extract Text
+                    words = []
                     for block in page.blocks:
                         for line in block.lines:
+                            # Filter low confidence
                             line_words = [w.value for w in line.words if w.confidence >= self.min_confidence]
-                            if line_words:
-                                text_parts.append(" ".join(line_words))
-                
-                results['question'] = self.clean_text(" ".join(text_parts))
-                
-            except Exception as e:
-                self.logger.error(f"Error processing question: {e}")
-
-        # 3. Process ANSWERS (Fast OpenCV Pipeline)
-        answer_keys = [k for k in processed_map.keys() if k != 'question']
-        all_crops = []
-        region_meta = [] # (name, count)
-        
-        for name in answer_keys:
-            img = processed_map[name]
-            # Use filter_edges=True to remove Checkmarks/Borders
-            crops = self._detect_words_opencv(img, filter_edges=True)
-            
-            if not crops:
-                region_meta.append((name, 0))
-                continue
-            
-            all_crops.extend(crops)
-            region_meta.append((name, len(crops)))
-            
-        # Batch Recognition for Answers
-        if all_crops:
-            try:
-                with self.inference_context():
-                    if torch.cuda.is_available():
-                        with torch.amp.autocast('cuda'):
-                            reco_out = self.model.reco_predictor(all_crops)
-                    else:
-                        reco_out = self.model.reco_predictor(all_crops)
-                
-                current_idx = 0
-                for name, count in region_meta:
-                    if count == 0: 
-                        continue
-                        
-                    region_results = reco_out[current_idx : current_idx + count]
-                    current_idx += count
+                            words.extend(line_words)
                     
-                    valid_words = [text for text, conf in region_results if conf >= self.min_confidence]
-                    
-                    full_text = " ".join(valid_words)
+                    full_text = " ".join(words)
                     cleaned = self.clean_text(full_text)
-                    cleaned = self.clean_answer_text(cleaned) # Specific answer cleaning
                     
-                    results[name] = cleaned
+                    if key != 'question':
+                        cleaned = self.clean_answer_text(cleaned)
+                        
+                    results[key] = cleaned
                     
             except Exception as e:
-                 self.logger.error(f"Error processing answers: {e}")
+                self.logger.error(f"Error processing single batch: {e}")
 
         return results
 
